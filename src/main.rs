@@ -43,8 +43,8 @@ impl MainState {
         for _ in 0..NUM_BOIDS {
             boids.push(Boid {
                 position: MyVector2(ggez::mint::Vector2 {
-                    x: rand::random::<f32>() * 800.0,
-                    y: rand::random::<f32>() * 600.0,
+                    x: rand::random::<f32>() * 1600.0,
+                    y: rand::random::<f32>() * 1200.0,
                 }),
                 velocity: MyVector2(ggez::mint::Vector2 {
                     x: (rand::random::<f32>() - 0.5) * 2.0,
@@ -88,7 +88,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
 }
 
 pub fn main() -> GameResult {
-    let (mut ctx, events_loop) = ggez::ContextBuilder::new("flocking", "ggez").build()?;
+    let (mut ctx, events_loop) = ggez::ContextBuilder::new("flocking", "ggez")
+        .window_setup(ggez::conf::WindowSetup::default().title("Flock Simulation")) // Window title
+        .window_mode(ggez::conf::WindowMode::default().dimensions(1600.0, 1200.0)) // Window dimensions
+        .build()
+        .expect("Failed to build the game context");
     let state = MainState::new(&mut ctx)?;
     event::run(ctx, events_loop, state)
 }
