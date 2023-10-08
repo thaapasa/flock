@@ -9,3 +9,5 @@ edition = "2021"
 [dependencies]
 ggez = "0.9.3" # Check crates.io for the latest version
 rand = "0.8.5" # Check crates.io for the latest version
+mint = "0.5.9"
+nalgebra = "0.32.3"

@@ -1,35 +1,47 @@
-extern crate ggez;
-use ggez::{event, graphics, Context, GameResult, graphics::Canvas};
+use ggez::{Context, GameResult, graphics, event::EventHandler};
+use ggez::event;
+use nalgebra as na;
+use ggez::graphics::Canvas;
 
-const NUM_BOIDS: usize = 100;
+const BOID_COUNT: usize = 150;
 
-#[derive(Clone, Copy)]
 struct Boid {
-    position: MyVector2,
-    velocity: MyVector2,
+    position: na::Point2<f32>,
+    velocity: na::Vector2<f32>,
 }
 
-// Wrapper for the Vector2 type
-#[derive(Clone, Copy)]
-pub struct MyVector2(pub ggez::mint::Vector2<f32>);
-
-// Implement addition and assignment operations for the wrapper type
-use std::ops::{Add, AddAssign};
-impl Add for MyVector2 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        MyVector2(ggez::mint::Vector2 {
-            x: self.0.x + rhs.0.x,
-            y: self.0.y + rhs.0.y,
-        })
+impl Boid {
+    fn new(_x: f32, _y: f32) -> Self {
+        Boid {
+            position: na::Point2::new(
+                rand::random::<f32>() * 1600.0,
+                rand::random::<f32>() * 1200.0,
+            ),
+            velocity: na::Vector2::new(
+                (rand::random::<f32>() - 0.5) * 2.0,
+                (rand::random::<f32>() - 0.5) * 2.0,
+            ),
+        }
     }
 }
 
-impl AddAssign for MyVector2 {
-    fn add_assign(&mut self, rhs: MyVector2) {
-        self.0.x += rhs.0.x;
-        self.0.y += rhs.0.y;
+// Define the extension trait
+trait NalgebraMintConversions {
+    fn to_mint(&self) -> mint::Point2<f32>;
+    fn from_mint(point: mint::Point2<f32>) -> Self;
+}
+
+// Implement the extension trait for nalgebra::Vector2<f32>
+impl NalgebraMintConversions for na::Vector2<f32> {
+    fn to_mint(&self) -> mint::Point2<f32> {
+        mint::Point2 {
+            x: self.x,
+            y: self.y,
+        }
+    }
+
+    fn from_mint(point: mint::Point2<f32>) -> Self {
+        na::Vector2::new(point.x, point.y)
     }
 }
 
@@ -39,29 +51,65 @@ struct MainState {
 
 impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
-        let mut boids = Vec::with_capacity(NUM_BOIDS);
-        for _ in 0..NUM_BOIDS {
-            boids.push(Boid {
-                position: MyVector2(ggez::mint::Vector2 {
-                    x: rand::random::<f32>() * 1600.0,
-                    y: rand::random::<f32>() * 1200.0,
-                }),
-                velocity: MyVector2(ggez::mint::Vector2 {
-                    x: (rand::random::<f32>() - 0.5) * 2.0,
-                    y: (rand::random::<f32>() - 0.5) * 2.0,
-                }),
-            });
+        let mut boids = Vec::with_capacity(BOID_COUNT);
+        for _ in 0..BOID_COUNT {
+            boids.push(Boid::new(400.0, 300.0)); // Start all boids at the center
         }
 
-        let s = MainState { boids };
-        Ok(s)
+        Ok(MainState { boids })
     }
 }
 
-impl event::EventHandler<ggez::GameError> for MainState {
+impl EventHandler for MainState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
-        for boid in &mut self.boids {
-            boid.position += boid.velocity;
+        for i in 0..self.boids.len() {
+            let mut separation = na::Vector2::new(0.0, 0.0 );
+            let mut alignment = na::Vector2::new(0.0, 0.0);
+            let mut cohesion = na::Vector2::new(0.0, 0.0);
+            
+            let mut neighbor_count = 0;
+            
+            for j in 0..self.boids.len() {
+                if i != j {
+                    let distance = na::distance(&self.boids[i].position, &self.boids[j].position);
+                    
+                    // Separation
+                    if distance < SEPARATION_DISTANCE {
+                        separation += self.boids[i].position - self.boids[j].position;
+                    }
+                    
+                    // Alignment and Cohesion
+                    if distance < NEIGHBOR_DISTANCE {
+                        alignment += self.boids[j].velocity;
+                        cohesion += na::Vector2::new(self.boids[j].position.x, self.boids[j].position.y);
+                        neighbor_count += 1;
+                    }
+                }
+            }
+    
+            // Calculate average for alignment and cohesion
+            if neighbor_count > 0 {
+                alignment /= neighbor_count as f32;
+                alignment = alignment.normalize() * MAX_SPEED - self.boids[i].velocity;
+    
+                cohesion /= neighbor_count as f32;
+                cohesion -= na::Vector2::new(self.boids[i].position.x, self.boids[i].position.y);
+            }
+    
+            // Limit the magnitude of the vectors
+            separation = limit_magnitude(separation, MAX_FORCE);
+            alignment = limit_magnitude(alignment, MAX_FORCE);
+            cohesion = limit_magnitude(cohesion, MAX_FORCE);
+    
+            // Apply the rules to the boid's velocity
+            self.boids[i].velocity += separation * SEPARATION_WEIGHT;
+            self.boids[i].velocity += alignment * ALIGNMENT_WEIGHT;
+            self.boids[i].velocity += cohesion * COHESION_WEIGHT;
+            self.boids[i].velocity = limit_magnitude(self.boids[i].velocity, MAX_SPEED);
+    
+            // Update position
+            let vel =na::Vector2::new(self.boids[i].velocity.x, self.boids[i].velocity.y);
+            self.boids[i].position += vel;
         }
         Ok(())
     }
@@ -75,7 +123,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
             let rect = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
-                graphics::Rect::new(boid.position.0.x, boid.position.0.y, 2.0, 10.0),
+                graphics::Rect::new(boid.position.x, boid.position.y, 2.0, 10.0),
                 graphics::Color::WHITE,
             )?;
             canvas.draw(&rect, graphics::DrawParam::default()); // Queue draw calls on the canvas
@@ -86,6 +134,22 @@ impl event::EventHandler<ggez::GameError> for MainState {
         Ok(())
     }
 }
+
+fn limit_magnitude(vec: na::Vector2<f32>, max: f32) -> na::Vector2<f32> {
+    if vec.magnitude() > max {
+        vec.normalize() * max
+    } else {
+        vec
+    }
+}
+
+const SEPARATION_DISTANCE: f32 = 25.0;
+const NEIGHBOR_DISTANCE: f32 = 50.0;
+const MAX_SPEED: f32 = 2.0;
+const MAX_FORCE: f32 = 0.1;
+const SEPARATION_WEIGHT: f32 = 1.5;
+const ALIGNMENT_WEIGHT: f32 = 1.0;
+const COHESION_WEIGHT: f32 = 1.0;
 
 pub fn main() -> GameResult {
     let (mut ctx, events_loop) = ggez::ContextBuilder::new("flocking", "ggez")
