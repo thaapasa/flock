@@ -1,79 +1,35 @@
-use ggez::{event, graphics, Context, GameResult};
-use ggez::mint as na;
+extern crate ggez;
+use ggez::{event, graphics, Context, GameResult, graphics::Canvas};
 
 const NUM_BOIDS: usize = 100;
-const BOID_RADIUS: f32 = 2.0;
-const NEIGHBOR_RADIUS: f32 = 50.0;
-const MAX_SPEED: f32 = 4.0;
-const MAX_FORCE: f32 = 0.05;
 
 #[derive(Clone, Copy)]
 struct Boid {
-    position: na::Point2<f32>,
-    velocity: na::Vector2<f32>,
+    position: MyVector2,
+    velocity: MyVector2,
 }
 
-use std::ops::AddAssign;
+// Wrapper for the Vector2 type
+#[derive(Clone, Copy)]
+pub struct MyVector2(pub ggez::mint::Vector2<f32>);
 
-impl Boid {
-    fn new(x: f32, y: f32) -> Self {
-        let velocity = na::Vector2 {
-            x: rand::random::<f32>() * 2.0 - 1.0,
-            y: rand::random::<f32>() * 2.0 - 1.0,  
-        };
-        Boid {
-            position: na::Point2::from([x, y]),
-            velocity,
-        }
+// Implement addition and assignment operations for the wrapper type
+use std::ops::{Add, AddAssign};
+impl Add for MyVector2 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        MyVector2(ggez::mint::Vector2 {
+            x: self.0.x + rhs.0.x,
+            y: self.0.y + rhs.0.y,
+        })
     }
+}
 
-    fn align(&self, boids: &[Boid]) -> na::Vector2<f32> {
-        let mut steering = na::Vector2::from([0.0, 0.0]);
-        let mut total = 0;
-
-        for boid in boids {
-            let distance = na::distance(&self.position, &boid.position);
-            if distance > 0.0 && distance < NEIGHBOR_RADIUS {
-                steering += boid.velocity;
-                total += 1;
-            }
-        }
-
-        if total > 0 {
-            steering /= total as f32;
-            steering = steering.normalize() * MAX_SPEED;
-            steering -= self.velocity;
-            steering = na::Vector2::new(
-                steering.x.max(-MAX_FORCE).min(MAX_FORCE),
-                steering.y.max(-MAX_FORCE).min(MAX_FORCE),
-            );
-        }
-
-        steering
-    }
-
-    // You'll need to implement `cohesion` and `separation` functions similar to `align`.
-
-    fn update(&mut self, boids: &[Boid]) {
-        let alignment = self.align(boids);
-        // let cohesion = self.cohesion(boids);
-        // let separation = self.separation(boids);
-        // Add the above functions to the velocity
-        self.velocity += alignment; // + cohesion + separation;
-        self.velocity = self.velocity.normalize() * MAX_SPEED;
-        self.position += self.velocity;
-    }
-
-    fn draw(&self, ctx: &mut Context) -> GameResult<()> {
-        let circle = graphics::Mesh::new_circle(
-            ctx,
-            graphics::DrawMode::fill(),
-            self.position,
-            BOID_RADIUS,
-            0.1,
-            graphics::Color::WHITE,
-        )?;
-        graphics::draw(ctx, &circle, (na::Point2::new(0.0, 0.0),))
+impl AddAssign for MyVector2 {
+    fn add_assign(&mut self, rhs: MyVector2) {
+        self.0.x += rhs.0.x;
+        self.0.y += rhs.0.y;
     }
 }
 
@@ -85,33 +41,54 @@ impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
         let mut boids = Vec::with_capacity(NUM_BOIDS);
         for _ in 0..NUM_BOIDS {
-            boids.push(Boid::new(rand::random::<f32>() * 800.0, rand::random::<f32>() * 600.0));
+            boids.push(Boid {
+                position: MyVector2(ggez::mint::Vector2 {
+                    x: rand::random::<f32>() * 800.0,
+                    y: rand::random::<f32>() * 600.0,
+                }),
+                velocity: MyVector2(ggez::mint::Vector2 {
+                    x: (rand::random::<f32>() - 0.5) * 2.0,
+                    y: (rand::random::<f32>() - 0.5) * 2.0,
+                }),
+            });
         }
 
-        Ok(MainState { boids })
+        let s = MainState { boids };
+        Ok(s)
     }
 }
 
 impl event::EventHandler<ggez::GameError> for MainState {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
+    fn update(&mut self, _ctx: &mut Context) -> GameResult {
         for boid in &mut self.boids {
-            boid.update(&self.boids);
+            boid.position += boid.velocity;
         }
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
-        graphics::clear(ctx, graphics::Color::BLACK);
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        let mut canvas = Canvas::from_frame(ctx, graphics::Color::BLACK); // Create canvas to draw on the screen
+
+        // canvas.clear(graphics::Color::BLACK)?; // Clear the canvas with black color
+
         for boid in &self.boids {
-            boid.draw(ctx)?;
+            let rect = graphics::Mesh::new_rectangle(
+                ctx,
+                graphics::DrawMode::fill(),
+                graphics::Rect::new(boid.position.0.x, boid.position.0.y, 2.0, 10.0),
+                graphics::Color::WHITE,
+            )?;
+            canvas.draw(&rect, graphics::DrawParam::default()); // Queue draw calls on the canvas
         }
-        graphics::present(ctx)
+
+        canvas.finish(ctx)?; // Submit the draw queue
+
+        Ok(())
     }
 }
 
-fn main() -> GameResult<()> {
-    let cb = ggez::ContextBuilder::new("boid_flocking", "author_name");
-    let (ctx, event_loop) = &mut cb.build()?;
-    let state = &mut MainState::new(ctx)?;
-    event::run(ctx, event_loop, state)
+pub fn main() -> GameResult {
+    let (mut ctx, events_loop) = ggez::ContextBuilder::new("flocking", "ggez").build()?;
+    let state = MainState::new(&mut ctx)?;
+    event::run(ctx, events_loop, state)
 }
